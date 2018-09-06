@@ -1,15 +1,14 @@
-﻿//Copyright (c) 2007-2016 ppy Pty Ltd <contact@ppy.sh>.
-//Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+﻿// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
 
 using System;
 using System.Globalization;
 using Newtonsoft.Json;
-using osu.Framework.Extensions;
 
 namespace osu.Game.Online.API
 {
     [Serializable]
-    internal class OAuthToken
+    public class OAuthToken
     {
         /// <summary>
         /// OAuth 2.0 access token.
@@ -22,12 +21,12 @@ namespace osu.Game.Online.API
         {
             get
             {
-                return AccessTokenExpiry - DateTime.Now.ToUnixTimestamp();
+                return AccessTokenExpiry - DateTimeOffset.UtcNow.ToUnixTimeSeconds();
             }
 
             set
             {
-                AccessTokenExpiry = DateTime.Now.AddSeconds(value).ToUnixTimestamp();
+                AccessTokenExpiry = DateTimeOffset.Now.AddSeconds(value).ToUnixTimeSeconds();
             }
         }
 
@@ -41,14 +40,14 @@ namespace osu.Game.Online.API
         [JsonProperty(@"refresh_token")]
         public string RefreshToken;
 
-        public override string ToString() => $@"{AccessToken}/{AccessTokenExpiry.ToString(NumberFormatInfo.InvariantInfo)}/{RefreshToken}";
+        public override string ToString() => $@"{AccessToken}|{AccessTokenExpiry.ToString(NumberFormatInfo.InvariantInfo)}|{RefreshToken}";
 
         public static OAuthToken Parse(string value)
         {
             try
             {
-                string[] parts = value.Split('/');
-                return new OAuthToken()
+                string[] parts = value.Split('|');
+                return new OAuthToken
                 {
                     AccessToken = parts[0],
                     AccessTokenExpiry = long.Parse(parts[1], NumberFormatInfo.InvariantInfo),
@@ -57,9 +56,7 @@ namespace osu.Game.Online.API
             }
             catch
             {
-
             }
-
             return null;
         }
     }

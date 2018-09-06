@@ -1,7 +1,8 @@
-﻿//Copyright (c) 2007-2016 ppy Pty Ltd <contact@ppy.sh>.
-//Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+﻿// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
 
 using System.Collections.Generic;
+using System.Linq;
 using osu.Framework.IO.Network;
 using osu.Game.Online.Chat;
 
@@ -9,21 +10,18 @@ namespace osu.Game.Online.API.Requests
 {
     public class GetMessagesRequest : APIRequest<List<Message>>
     {
-        List<Channel> channels;
-        long? since;
+        private readonly List<Channel> channels;
+        private readonly long? since;
 
         public GetMessagesRequest(List<Channel> channels, long? sinceId)
         {
             this.channels = channels;
-            this.since = sinceId;
+            since = sinceId;
         }
 
         protected override WebRequest CreateWebRequest()
         {
-            string channelString = string.Empty;
-            foreach (Channel c in channels)
-                channelString += c.Id + ",";
-            channelString = channelString.TrimEnd(',');
+            string channelString = string.Join(",", channels.Select(x => x.Id));
 
             var req = base.CreateWebRequest();
             req.AddParameter(@"channels", channelString);

@@ -1,14 +1,25 @@
-﻿using System;
+﻿// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+
+using System;
 using osu.Framework;
+using osu.Framework.Allocation;
+using osu.Framework.Audio;
+using osu.Framework.Audio.Sample;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
-using osu.Framework.Graphics.Sprites;
-using osu.Framework.Graphics.Transformations;
-using osu.Framework.Input;
+using osu.Framework.Graphics.Shapes;
 using osu.Game.Graphics;
+using osu.Game.Graphics.Sprites;
 using OpenTK;
 using OpenTK.Graphics;
 using OpenTK.Input;
+using osu.Framework.Extensions.Color4Extensions;
+using osu.Game.Graphics.Containers;
+using osu.Framework.Audio.Track;
+using osu.Framework.Input.EventArgs;
+using osu.Framework.Input.States;
+using osu.Game.Beatmaps.ControlPoints;
 
 namespace osu.Game.Screens.Menu
 {
@@ -16,50 +27,74 @@ namespace osu.Game.Screens.Menu
     /// Button designed specifically for the osu!next main menu.
     /// In order to correctly flow, we have to use a negative margin on the parent container (due to the parallelogram shape).
     /// </summary>
-    public class Button : Container, IStateful<ButtonState>
+    public class Button : BeatSyncedContainer, IStateful<ButtonState>
     {
-        private Container iconText;
-        private Box box;
-        private Color4 colour;
-        private TextAwesome icon;
-        private string internalName;
-        private readonly FontAwesome symbol;
-        private Action clickAction;
-        private readonly float extraWidth;
-        private Key triggerKey;
-        private string text;
+        public event Action<ButtonState> StateChanged;
 
-        public override bool Contains(Vector2 screenSpacePos)
-        {
-            return box.Contains(screenSpacePos);
-        }
+        private readonly Container iconText;
+        private readonly Container box;
+        private readonly Box boxHoverLayer;
+        private readonly SpriteIcon icon;
+        private readonly string sampleName;
 
-        public Button(string text, string internalName, FontAwesome symbol, Color4 colour, Action clickAction = null, float extraWidth = 0, Key triggerKey = Key.Unknown)
+        /// <summary>
+        /// The menu state for which we are visible for.
+        /// </summary>
+        public ButtonSystemState VisibleState = ButtonSystemState.TopLevel;
+
+        private readonly Action clickAction;
+        private readonly Key triggerKey;
+        private SampleChannel sampleClick;
+        private SampleChannel sampleHover;
+
+        public override bool ReceiveMouseInputAt(Vector2 screenSpacePos) => box.ReceiveMouseInputAt(screenSpacePos);
+
+        public Button(string text, string sampleName, FontAwesome symbol, Color4 colour, Action clickAction = null, float extraWidth = 0, Key triggerKey = Key.Unknown)
         {
-            this.internalName = internalName;
-            this.symbol = symbol;
-            this.colour = colour;
+            this.sampleName = sampleName;
             this.clickAction = clickAction;
-            this.extraWidth = extraWidth;
             this.triggerKey = triggerKey;
-            this.text = text;
 
             AutoSizeAxes = Axes.Both;
             Alpha = 0;
 
-            Vector2 boxSize = new Vector2(ButtonSystem.button_width + Math.Abs(extraWidth), ButtonSystem.button_area_height);
+            Vector2 boxSize = new Vector2(ButtonSystem.BUTTON_WIDTH + Math.Abs(extraWidth), ButtonArea.BUTTON_AREA_HEIGHT);
 
             Children = new Drawable[]
             {
-                box = new Box
+                box = new Container
                 {
+                    Masking = true,
+                    MaskingSmoothness = 2,
+                    EdgeEffect = new EdgeEffectParameters
+                    {
+                        Type = EdgeEffectType.Shadow,
+                        Colour = Color4.Black.Opacity(0.2f),
+                        Roundness = 5,
+                        Radius = 8,
+                    },
                     Anchor = Anchor.Centre,
                     Origin = Anchor.Centre,
-                    Colour = colour,
                     Scale = new Vector2(0, 1),
                     Size = boxSize,
-                    Shear = new Vector2(ButtonSystem.wedge_width / boxSize.Y, 0),
-                    EdgeSmoothness = new Vector2(2, 0),
+                    Shear = new Vector2(ButtonSystem.WEDGE_WIDTH / boxSize.Y, 0),
+                    Children = new[]
+                    {
+                        new Box
+                        {
+                            EdgeSmoothness = new Vector2(1.5f, 0),
+                            RelativeSizeAxes = Axes.Both,
+                            Colour = colour,
+                        },
+                        boxHoverLayer = new Box
+                        {
+                            EdgeSmoothness = new Vector2(1.5f, 0),
+                            RelativeSizeAxes = Axes.Both,
+                            Blending = BlendingMode.Additive,
+                            Colour = Color4.White,
+                            Alpha = 0,
+                        },
+                    }
                 },
                 iconText = new Container
                 {
@@ -69,16 +104,19 @@ namespace osu.Game.Screens.Menu
                     Origin = Anchor.Centre,
                     Children = new Drawable[]
                     {
-                        icon = new TextAwesome
+                        icon = new SpriteIcon
                         {
+                            Shadow = true,
                             Anchor = Anchor.Centre,
-                            TextSize = 30,
+                            Origin = Anchor.Centre,
+                            Size = new Vector2(30),
                             Position = new Vector2(0, 0),
                             Icon = symbol
                         },
-                        new SpriteText
+                        new OsuSpriteText
                         {
-                            Direction = FlowDirection.HorizontalOnly,
+                            Shadow = true,
+                            AllowMultiline = false,
                             Anchor = Anchor.Centre,
                             Origin = Anchor.Centre,
                             TextSize = 16,
@@ -90,110 +128,77 @@ namespace osu.Game.Screens.Menu
             };
         }
 
+        private bool rightward;
+
+        protected override void OnNewBeat(int beatIndex, TimingControlPoint timingPoint, EffectControlPoint effectPoint, TrackAmplitudes amplitudes)
+        {
+            base.OnNewBeat(beatIndex, timingPoint, effectPoint, amplitudes);
+
+            if (!IsHovered) return;
+
+            double duration = timingPoint.BeatLength / 2;
+
+            icon.RotateTo(rightward ? 10 : -10, duration * 2, Easing.InOutSine);
+
+            icon.Animate(
+                i => i.MoveToY(-10, duration, Easing.Out),
+                i => i.ScaleTo(1, duration, Easing.Out)
+            ).Then(
+                i => i.MoveToY(0, duration, Easing.In),
+                i => i.ScaleTo(new Vector2(1, 0.9f), duration, Easing.In)
+            );
+
+            rightward = !rightward;
+        }
+
         protected override bool OnHover(InputState state)
         {
             if (State != ButtonState.Expanded) return true;
 
-            //if (OsuGame.Instance.IsActive)
-            //    Game.Audio.PlaySamplePositional($@"menu-{internalName}-hover", @"menuclick");
+            sampleHover?.Play();
 
-            box.ScaleTo(new Vector2(1.5f, 1), 500, EasingTypes.OutElastic);
+            box.ScaleTo(new Vector2(1.5f, 1), 500, Easing.OutElastic);
 
-            int duration = 0; //(int)(Game.Audio.BeatLength / 2);
-            if (duration == 0) duration = 250;
+            double duration = TimeUntilNextBeat;
 
-            icon.ClearTransformations();
-
-            icon.ScaleTo(1, 500, EasingTypes.OutElasticHalf);
-
-            double offset = 0; //(1 - Game.Audio.SyncBeatProgress) * duration;
-            double startTime = Time.Current + offset;
-
-            icon.RotateTo(10, offset, EasingTypes.InOutSine);
-            icon.ScaleTo(new Vector2(1, 0.9f), offset, EasingTypes.Out);
-
-            icon.Transforms.Add(new TransformRotation
-            {
-                StartValue = -10,
-                EndValue = 10,
-                StartTime = startTime,
-                EndTime = startTime + duration * 2,
-                Easing = EasingTypes.InOutSine,
-                LoopCount = -1,
-                LoopDelay = duration * 2
-            });
-
-            icon.Transforms.Add(new TransformPosition
-            {
-                StartValue = Vector2.Zero,
-                EndValue = new Vector2(0, -10),
-                StartTime = startTime,
-                EndTime = startTime + duration,
-                Easing = EasingTypes.Out,
-                LoopCount = -1,
-                LoopDelay = duration
-            });
-
-            icon.Transforms.Add(new TransformScale
-            {
-                StartValue = new Vector2(1, 0.9f),
-                EndValue = Vector2.One,
-                StartTime = startTime,
-                EndTime = startTime + duration,
-                Easing = EasingTypes.Out,
-                LoopCount = -1,
-                LoopDelay = duration
-            });
-
-            icon.Transforms.Add(new TransformPosition
-            {
-                StartValue = new Vector2(0, -10),
-                EndValue = Vector2.Zero,
-                StartTime = startTime + duration,
-                EndTime = startTime + duration * 2,
-                Easing = EasingTypes.In,
-                LoopCount = -1,
-                LoopDelay = duration
-            });
-
-            icon.Transforms.Add(new TransformScale
-            {
-                StartValue = Vector2.One,
-                EndValue = new Vector2(1, 0.9f),
-                StartTime = startTime + duration,
-                EndTime = startTime + duration * 2,
-                Easing = EasingTypes.In,
-                LoopCount = -1,
-                LoopDelay = duration
-            });
-
-            icon.Transforms.Add(new TransformRotation
-            {
-                StartValue = 10,
-                EndValue = -10,
-                StartTime = startTime + duration * 2,
-                EndTime = startTime + duration * 4,
-                Easing = EasingTypes.InOutSine,
-                LoopCount = -1,
-                LoopDelay = duration * 2
-            });
-
+            icon.ClearTransforms();
+            icon.RotateTo(rightward ? -10 : 10, duration, Easing.InOutSine);
+            icon.ScaleTo(new Vector2(1, 0.9f), duration, Easing.Out);
             return true;
         }
 
         protected override void OnHoverLost(InputState state)
         {
-            icon.ClearTransformations();
-            icon.RotateTo(0, 500, EasingTypes.Out);
-            icon.MoveTo(Vector2.Zero, 500, EasingTypes.Out);
-            icon.ScaleTo(0.7f, 500, EasingTypes.OutElasticHalf);
-            icon.ScaleTo(Vector2.One, 200, EasingTypes.Out);
+            icon.ClearTransforms();
+            icon.RotateTo(0, 500, Easing.Out);
+            icon.MoveTo(Vector2.Zero, 500, Easing.Out);
+            icon.ScaleTo(Vector2.One, 200, Easing.Out);
 
             if (State == ButtonState.Expanded)
-                box.ScaleTo(new Vector2(1, 1), 500, EasingTypes.OutElastic);
+                box.ScaleTo(new Vector2(1, 1), 500, Easing.OutElastic);
+        }
+
+        [BackgroundDependencyLoader]
+        private void load(AudioManager audio)
+        {
+            sampleHover = audio.Sample.Get(@"Menu/button-hover");
+            if (!string.IsNullOrEmpty(sampleName))
+                sampleClick = audio.Sample.Get($@"Menu/{sampleName}");
         }
 
         protected override bool OnMouseDown(InputState state, MouseDownEventArgs args)
+        {
+            boxHoverLayer.FadeTo(0.1f, 1000, Easing.OutQuint);
+            return base.OnMouseDown(state, args);
+        }
+
+        protected override bool OnMouseUp(InputState state, MouseUpEventArgs args)
+        {
+            boxHoverLayer.FadeTo(0, 1000, Easing.OutQuint);
+            return base.OnMouseUp(state, args);
+        }
+
+        protected override bool OnClick(InputState state)
         {
             trigger();
             return true;
@@ -201,7 +206,8 @@ namespace osu.Game.Screens.Menu
 
         protected override bool OnKeyDown(InputState state, KeyDownEventArgs args)
         {
-            base.OnKeyDown(state, args);
+            if (args.Repeat || state.Keyboard.ControlPressed || state.Keyboard.ShiftPressed || state.Keyboard.AltPressed)
+                return false;
 
             if (triggerKey == args.Key && triggerKey != Key.Unknown)
             {
@@ -214,14 +220,17 @@ namespace osu.Game.Screens.Menu
 
         private void trigger()
         {
-            //Game.Audio.PlaySamplePositional($@"menu-{internalName}-click", internalName.Contains(@"back") ? @"menuback" : @"menuhit");
+            sampleClick?.Play();
 
             clickAction?.Invoke();
 
-            //box.FlashColour(ColourHelper.Lighten2(colour, 0.7f), 200);
+            boxHoverLayer.ClearTransforms();
+            boxHoverLayer.Alpha = 0.9f;
+            boxHoverLayer.FadeOut(800, Easing.OutExpo);
         }
 
-        public override bool HandleInput => state != ButtonState.Exploded && box.Scale.X >= 0.8f;
+        public override bool HandleKeyboardInput => state == ButtonState.Expanded;
+        public override bool HandleMouseInput => state != ButtonState.Exploded && box.Scale.X >= 0.8f;
 
         protected override void Update()
         {
@@ -231,13 +240,14 @@ namespace osu.Game.Screens.Menu
 
         public int ContractStyle;
 
-        ButtonState state;
+        private ButtonState state;
+
         public ButtonState State
         {
             get { return state; }
+
             set
             {
-
                 if (state == value)
                     return;
 
@@ -249,24 +259,54 @@ namespace osu.Game.Screens.Menu
                         switch (ContractStyle)
                         {
                             default:
-                                box.ScaleTo(new Vector2(0, 1), 500, EasingTypes.OutExpo);
-                                FadeOut(500);
+                                box.ScaleTo(new Vector2(0, 1), 500, Easing.OutExpo);
+                                this.FadeOut(500);
                                 break;
                             case 1:
-                                box.ScaleTo(new Vector2(0, 1), 400, EasingTypes.InSine);
-                                FadeOut(800);
+                                box.ScaleTo(new Vector2(0, 1), 400, Easing.InSine);
+                                this.FadeOut(800);
                                 break;
                         }
+
                         break;
                     case ButtonState.Expanded:
                         const int expand_duration = 500;
-                        box.ScaleTo(new Vector2(1, 1), expand_duration, EasingTypes.OutExpo);
-                        FadeIn(expand_duration / 6);
+                        box.ScaleTo(new Vector2(1, 1), expand_duration, Easing.OutExpo);
+                        this.FadeIn(expand_duration / 6f);
                         break;
                     case ButtonState.Exploded:
                         const int explode_duration = 200;
-                        box.ScaleTo(new Vector2(2, 1), explode_duration, EasingTypes.OutExpo);
-                        FadeOut(explode_duration / 4 * 3);
+                        box.ScaleTo(new Vector2(2, 1), explode_duration, Easing.OutExpo);
+                        this.FadeOut(explode_duration / 4f * 3);
+                        break;
+                }
+
+                StateChanged?.Invoke(State);
+            }
+        }
+
+        public ButtonSystemState ButtonSystemState
+        {
+            set
+            {
+                ContractStyle = 0;
+
+                switch (value)
+                {
+                    case ButtonSystemState.Initial:
+                        State = ButtonState.Contracted;
+                        break;
+                    case ButtonSystemState.EnteringMode:
+                        ContractStyle = 1;
+                        State = ButtonState.Contracted;
+                        break;
+                    default:
+                        if (value == VisibleState)
+                            State = ButtonState.Expanded;
+                        else if (value < VisibleState)
+                            State = ButtonState.Contracted;
+                        else
+                            State = ButtonState.Exploded;
                         break;
                 }
             }

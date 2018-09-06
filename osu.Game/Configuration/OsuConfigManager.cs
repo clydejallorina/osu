@@ -1,349 +1,156 @@
-﻿//Copyright (c) 2007-2016 ppy Pty Ltd <contact@ppy.sh>.
-//Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+﻿// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
 
 using osu.Framework.Configuration;
+using osu.Framework.Configuration.Tracking;
 using osu.Framework.Platform;
-using osu.Game.Modes;
-using osu.Game.Online.API;
-using osu.Game.Screens.Play;
+using osu.Game.Overlays;
+using osu.Game.Rulesets.Scoring;
+using osu.Game.Screens.Select;
 
 namespace osu.Game.Configuration
 {
-    class OsuConfigManager : ConfigManager<OsuConfig>
+    public class OsuConfigManager : IniConfigManager<OsuSetting>
     {
         protected override void InitialiseDefaults()
         {
-            Set(OsuConfig.Width, 1366, 640);
-            Set(OsuConfig.Height, 768, 480);
-            Set(OsuConfig.MouseSpeed, 1.0);
+            // UI/selection defaults
+            Set(OsuSetting.Ruleset, 0, 0, int.MaxValue);
+            Set(OsuSetting.Skin, 0, 0, int.MaxValue);
 
-            Set(OsuConfig.Username, string.Empty);
-            Set(OsuConfig.Password, string.Empty);
-            Set(OsuConfig.Token, string.Empty);
+            Set(OsuSetting.BeatmapDetailTab, BeatmapDetailTab.Details);
 
-            Set(OsuConfig.PlayMode, PlayMode.Osu);
-            
-            Set(OsuConfig.BeatmapDirectory, @"Songs"); // TODO: use this
-            
-            Set(OsuConfig.VolumeUniversal, 0.8, 0, 1);
-            Set(OsuConfig.VolumeMusic, 1.0, 0, 1);
-            Set(OsuConfig.VolumeEffect, 1.0, 0, 1);
-            
-            Set(OsuConfig.AllowPublicInvites, true);
-            Set(OsuConfig.AutoChatHide, true);
-            Set(OsuConfig.AutomaticDownload, true);
-            Set(OsuConfig.AutomaticDownloadNoVideo, false);
-            Set(OsuConfig.BlockNonFriendPM, false);
-            Set(OsuConfig.BloomSoftening, false);
-            Set(OsuConfig.BossKeyFirstActivation, true);
-            Set(OsuConfig.ChatAudibleHighlight, true);
-            Set(OsuConfig.ChatChannels, string.Empty);
-            Set(OsuConfig.ChatFilter, false);
-            Set(OsuConfig.ChatHighlightName, true);
-            Set(OsuConfig.ChatMessageNotification, true);
-            Set(OsuConfig.ChatLastChannel, string.Empty);
-            Set(OsuConfig.ChatRemoveForeign, false);
-            //Set(OsuConfig.ChatSortMode, UserSortMode.Rank);
-            Set(OsuConfig.ComboBurst, true);
-            Set(OsuConfig.ComboFire, false);
-            Set(OsuConfig.ComboFireHeight, 3);
-            Set(OsuConfig.ConfirmExit, false);
-            Set(OsuConfig.AutoSendNowPlaying, true);
-            Set(OsuConfig.CursorSize, 1.0, 0.5f, 2);
-            Set(OsuConfig.AutomaticCursorSizing, false);
-            Set(OsuConfig.DimLevel, 30, 0, 100);
-            Set(OsuConfig.Display, 1);
-            Set(OsuConfig.DisplayCityLocation, false);
-            Set(OsuConfig.DistanceSpacingEnabled, true);
-            Set(OsuConfig.EditorTip, 0);
-            Set(OsuConfig.VideoEditor, Get<bool>(OsuConfig.Fullscreen));
-            Set(OsuConfig.EditorDefaultSkin, false);
-            Set(OsuConfig.EditorSnakingSliders, true);
-            Set(OsuConfig.EditorHitAnimations, false);
-            Set(OsuConfig.EditorFollowPoints, true);
-            Set(OsuConfig.EditorStacking, true);
-            Set(OsuConfig.ForceSliderRendering, false);
-            Set(OsuConfig.FpsCounter, false);
-            Set(OsuConfig.FrameTimeDisplay, false);
-            Set(OsuConfig.GuideTips, @"");
-            Set(OsuConfig.CursorRipple, false);
-            Set(OsuConfig.HighlightWords, string.Empty);
-            Set(OsuConfig.HighResolution, false);
-            Set(OsuConfig.HitLighting, true);
-            Set(OsuConfig.IgnoreBarline, false);
-            Set(OsuConfig.IgnoreBeatmapSamples, false);
-            Set(OsuConfig.IgnoreBeatmapSkins, false);
-            Set(OsuConfig.IgnoreList, string.Empty);
-            Set(OsuConfig.KeyOverlay, false);
-            Set(OsuConfig.Language, @"unknown");
-            Set(OsuConfig.AllowNowPlayingHighlights, false);
-            Set(OsuConfig.LastVersion, string.Empty);
-            Set(OsuConfig.LastVersionPermissionsFailed, string.Empty);
-            Set(OsuConfig.LoadSubmittedThread, true);
-            Set(OsuConfig.LobbyPlayMode, -1);
-            Set(OsuConfig.ShowInterface, true);
-            Set(OsuConfig.ShowInterfaceDuringRelax, false);
-            Set(OsuConfig.LobbyShowExistingOnly, false);
-            Set(OsuConfig.LobbyShowFriendsOnly, false);
-            Set(OsuConfig.LobbyShowFull, false);
-            Set(OsuConfig.LobbyShowInProgress, true);
-            Set(OsuConfig.LobbyShowPassworded, true);
-            Set(OsuConfig.LogPrivateMessages, false);
-            Set(OsuConfig.LowResolution, false);
-            //Set(OsuConfig.ManiaSpeed, SpeedMania.SPEED_DEFAULT, SpeedMania.SPEED_MIN, SpeedMania.SPEED_MAX);
-            Set(OsuConfig.UsePerBeatmapManiaSpeed, true);
-            Set(OsuConfig.ManiaSpeedBPMScale, true);
-            Set(OsuConfig.MenuTip, 0);
-            Set(OsuConfig.MouseDisableButtons, false);
-            Set(OsuConfig.MouseDisableWheel, false);
-            Set(OsuConfig.MouseSpeed, 1, 0.4, 6);
-            Set(OsuConfig.Offset, 0, -300, 300);
-            //Set(OsuConfig.ScoreMeterScale, 1, 0.5, OsuGame.Tournament ? 10 : 2);
-            Set(OsuConfig.DistanceSpacing, 0.8, 0.1, 6);
-            Set(OsuConfig.EditorBeatDivisor, 1, 1, 16);
-            Set(OsuConfig.EditorGridSize, 32, 4, 32);
-            Set(OsuConfig.EditorGridSizeDesign, 32, 4, 32);
-            Set(OsuConfig.HeightFullscreen, 9999, 240, 9999);
-            Set(OsuConfig.CustomFrameLimit, 240, 240, 999);
-            Set(OsuConfig.WidthFullscreen, 9999, 320, 9999);
-            Set(OsuConfig.MsnIntegration, false);
-            Set(OsuConfig.MyPcSucks, false);
-            Set(OsuConfig.NotifyFriends, true);
-            Set(OsuConfig.NotifySubmittedThread, true);
-            Set(OsuConfig.PopupDuringGameplay, true);
-            //Set(OsuConfig.ProgressBarType, ProgressBarTypes.Pie);
-            //Set(OsuConfig.RankType, RankingType.Top);
-            Set(OsuConfig.RefreshRate, 60);
-            Set(OsuConfig.OverrideRefreshRate, Get<int>(OsuConfig.RefreshRate) != 60);
-            //Set(OsuConfig.ScaleMode, ScaleMode.WidescreenConservative);
-            Set(OsuConfig.ScoreboardVisible, true);
-            //Set(OsuConfig.ScoreMeter, OsuGame.Tournament ? ScoreMeterType.Colour : ScoreMeterType.Error);
-            Set(OsuConfig.ScreenshotId, 0);
-            Set(OsuConfig.MenuSnow, false);
-            Set(OsuConfig.MenuTriangles, true);
-            Set(OsuConfig.SongSelectThumbnails, true);
-            //Set(OsuConfig.ScreenshotFormat, ImageFileFormat.Jpg);
-            Set(OsuConfig.ShowReplayComments, true);
-            Set(OsuConfig.ShowSpectators, true);
-            Set(OsuConfig.ShowStoryboard, true);
-            //Set(OsuConfig.Skin, SkinManager.DEFAULT_SKIN);
-            Set(OsuConfig.SkinSamples, true);
-            Set(OsuConfig.SkipTablet, false);
-            Set(OsuConfig.SnakingSliders, true);
-            Set(OsuConfig.Tablet, false);
-            Set(OsuConfig.UpdatePending, false);
-            Set(OsuConfig.UseSkinCursor, false);
-            Set(OsuConfig.UseTaikoSkin, false);
-            Set(OsuConfig.Video, true);
-            Set(OsuConfig.Wiimote, false);
-            Set(OsuConfig.YahooIntegration, false);
-            Set(OsuConfig.ForceFrameFlush, false);
-            Set(OsuConfig.DetectPerformanceIssues, true);
-            Set(OsuConfig.Fullscreen, true);
-            Set(OsuConfig.MenuMusic, true);
-            Set(OsuConfig.MenuVoice, true);
-            Set(OsuConfig.MenuParallax, true);
-            Set(OsuConfig.RawInput, false);
-            Set(OsuConfig.AbsoluteToOsuWindow, Get<bool>(OsuConfig.RawInput));
-            Set(OsuConfig.ShowMenuTips, true);
-            Set(OsuConfig.HiddenShowFirstApproach, true);
-            Set(OsuConfig.ComboColourSliderBall, true);
-            Set(OsuConfig.AlternativeChatFont, false);
-            Set(OsuConfig.Password, string.Empty);
-            Set(OsuConfig.Username, string.Empty);
-            Set(OsuConfig.DisplayStarsMaximum, 10, 0, 10);
-            Set(OsuConfig.DisplayStarsMinimum, 0, 0, 10);
-            Set(OsuConfig.AudioDevice, string.Empty);
-            //Set(OsuConfig.ReleaseStream, ReleaseStream.Lazer, true);
-            Set(OsuConfig.UpdateFailCount, 0);
-            //Set(OsuConfig.SavePassword, Password != null);
-            Set(OsuConfig.SaveUsername, true);
-            //Set(OsuConfig.TreeSortMode, TreeGroupMode.Show_All);
-            //Set(OsuConfig.TreeSortMode2, TreeSortMode.Title);
-            Set(OsuConfig.Letterboxing, Get<bool>(OsuConfig.Fullscreen));
-            Set(OsuConfig.LetterboxPositionX, 0, -100, 100);
-            Set(OsuConfig.LetterboxPositionY, 0, -100, 100);
-            //Set(OsuConfig.FrameSync, FrameSync.Limit120);
-            bool unicodeDefault = false;
-            switch (Get<string>(OsuConfig.Language))
+            Set(OsuSetting.ShowConvertedBeatmaps, true);
+            Set(OsuSetting.DisplayStarsMinimum, 0.0, 0, 10, 0.1);
+            Set(OsuSetting.DisplayStarsMaximum, 10.0, 0, 10, 0.1);
+
+            Set(OsuSetting.RandomSelectAlgorithm, RandomSelectAlgorithm.RandomPermutation);
+
+            Set(OsuSetting.ChatDisplayHeight, ChatOverlay.DEFAULT_HEIGHT, 0.2, 1);
+
+            // Online settings
+            Set(OsuSetting.Username, string.Empty);
+            Set(OsuSetting.Token, string.Empty);
+
+            Set(OsuSetting.SavePassword, false).ValueChanged += val =>
             {
-                case @"zh":
-                case @"ja":
-                case @"ko":
-                    unicodeDefault = true;
-                    break;
-            }
-            Set(OsuConfig.ShowUnicode, unicodeDefault);
-            Set(OsuConfig.PermanentSongInfo, false);
-            Set(OsuConfig.Ticker, false);
-            Set(OsuConfig.CompatibilityContext, false);
-            Set(OsuConfig.CanForceOptimusCompatibility, true);
+                if (val) Set(OsuSetting.SaveUsername, true);
+            };
+
+            Set(OsuSetting.SaveUsername, true).ValueChanged += val =>
+            {
+                if (!val) Set(OsuSetting.SavePassword, false);
+            };
+
+            // Audio
+            Set(OsuSetting.VolumeInactive, 0.25, 0, 1, 0.01);
+
+            Set(OsuSetting.MenuVoice, true);
+            Set(OsuSetting.MenuMusic, true);
+
+            Set(OsuSetting.AudioOffset, 0, -500.0, 500.0, 1);
+
+            // Input
+            Set(OsuSetting.MenuCursorSize, 1.0, 0.5f, 2, 0.01);
+            Set(OsuSetting.GameplayCursorSize, 1.0, 0.5f, 2, 0.01);
+            Set(OsuSetting.AutoCursorSize, false);
+
+            Set(OsuSetting.MouseDisableButtons, false);
+            Set(OsuSetting.MouseDisableWheel, false);
+
+            // Graphics
+            Set(OsuSetting.ShowFpsDisplay, false);
+
+            Set(OsuSetting.ShowStoryboard, true);
+            Set(OsuSetting.BeatmapSkins, true);
+            Set(OsuSetting.BeatmapHitsounds, true);
+
+            Set(OsuSetting.CursorRotation, true);
+
+            Set(OsuSetting.MenuParallax, true);
+
+            Set(OsuSetting.SnakingInSliders, true);
+            Set(OsuSetting.SnakingOutSliders, true);
+
+            // Gameplay
+            Set(OsuSetting.DimLevel, 0.3, 0, 1, 0.01);
+            Set(OsuSetting.BlurLevel, 0, 0, 1, 0.01);
+
+            Set(OsuSetting.ShowInterface, true);
+            Set(OsuSetting.KeyOverlay, false);
+
+            Set(OsuSetting.FloatingComments, false);
+
+            Set(OsuSetting.ScoreDisplayMode, ScoringMode.Standardised);
+
+            Set(OsuSetting.SpeedChangeVisualisation, SpeedChangeVisualisationMethod.Sequential);
+
+            Set(OsuSetting.IncreaseFirstObjectVisibility, true);
+
+            // Update
+            Set(OsuSetting.ReleaseStream, ReleaseStream.Lazer);
+
+            Set(OsuSetting.Version, string.Empty);
+
+            Set(OsuSetting.ScreenshotFormat, ScreenshotFormat.Jpg);
+            Set(OsuSetting.ScreenshotCaptureMenuCursor, false);
+
+            Set(OsuSetting.SongSelectRightMouseScroll, false);
         }
 
-        //todo: make a UnicodeString class/struct rather than requiring this helper method.
-        public string GetUnicodeString(string nonunicode, string unicode)
-            => Get<bool>(OsuConfig.ShowUnicode) ? unicode ?? nonunicode : nonunicode ?? unicode;
-
-        public OsuConfigManager(BasicStorage storage) : base(storage)
+        public OsuConfigManager(Storage storage) : base(storage)
         {
         }
+
+        public override TrackedSettings CreateTrackedSettings() => new TrackedSettings
+        {
+            new TrackedSetting<bool>(OsuSetting.MouseDisableButtons, v => new SettingDescription(!v, "gameplay mouse buttons", v ? "disabled" : "enabled"))
+        };
     }
 
-    enum OsuConfig
+    public enum OsuSetting
     {
-        // New osu:
-        PlayMode,
+        Ruleset,
         Token,
-        // Imported from old osu:
-        BeatmapDirectory,
-        VolumeUniversal,
-        VolumeEffect,
-        VolumeMusic,
-        AllowPublicInvites,
-        AutoChatHide,
-        AutomaticDownload,
-        AutomaticDownloadNoVideo,
-        BlockNonFriendPM,
-        Bloom,
-        BloomSoftening,
-        BossKeyFirstActivation,
-        ChatAudibleHighlight,
-        ChatChannels,
-        ChatFilter,
-        ChatHighlightName,
-        ChatMessageNotification,
-        ChatLastChannel,
-        ChatRemoveForeign,
-        ChatSortMode,
-        ComboBurst,
-        ComboFire,
-        ComboFireHeight,
-        ConfirmExit,
-        AutoSendNowPlaying,
-        CursorSize,
-        AutomaticCursorSizing,
+        MenuCursorSize,
+        GameplayCursorSize,
+        AutoCursorSize,
         DimLevel,
-        Display,
-        DisplayCityLocation,
-        DistanceSpacingEnabled,
-        EditorTip,
-        VideoEditor,
-        EditorDefaultSkin,
-        EditorSnakingSliders,
-        EditorHitAnimations,
-        EditorFollowPoints,
-        EditorStacking,
-        ForceSliderRendering,
-        FpsCounter,
-        FrameTimeDisplay,
-        GuideTips,
-        CursorRipple,
-        HighlightWords,
-        HighResolution,
-        HitLighting,
-        IgnoreBarline,
-        IgnoreBeatmapSamples,
-        IgnoreBeatmapSkins,
-        IgnoreList,
+        BlurLevel,
+        ShowStoryboard,
         KeyOverlay,
-        Language,
-        LastPlayMode,
-        AllowNowPlayingHighlights,
-        LastVersion,
-        LastVersionPermissionsFailed,
-        LoadSubmittedThread,
-        LobbyPlayMode,
+        FloatingComments,
         ShowInterface,
-        ShowInterfaceDuringRelax,
-        LobbyShowExistingOnly,
-        LobbyShowFriendsOnly,
-        LobbyShowFull,
-        LobbyShowInProgress,
-        LobbyShowPassworded,
-        LogPrivateMessages,
-        LowResolution,
-        ManiaSpeed,
-        UsePerBeatmapManiaSpeed,
-        ManiaSpeedBPMScale,
-        MenuTip,
         MouseDisableButtons,
         MouseDisableWheel,
-        MouseSpeed,
-        Offset,
-        ScoreMeterScale,
-        DistanceSpacing,
-        EditorBeatDivisor,
-        EditorGridSize,
-        EditorGridSizeDesign,
-        Height,
-        Width,
-        HeightFullscreen,
-        CustomFrameLimit,
-        WidthFullscreen,
-        MsnIntegration,
-        MyPcSucks,
-        NotifyFriends,
-        NotifySubmittedThread,
-        PopupDuringGameplay,
-        ProgressBarType,
-        RankType,
-        RefreshRate,
-        OverrideRefreshRate,
-        ScaleMode,
-        ScoreboardVisible,
-        ScoreMeter,
-        ScreenshotId,
-        MenuSnow,
-        MenuTriangles,
-        SongSelectThumbnails,
-        ScreenshotFormat,
-        ShowReplayComments,
-        ShowSpectators,
-        ShowStoryboard,
-        Skin,
-        SkinSamples,
-        SkipTablet,
-        SnakingSliders,
-        Tablet,
-        UpdatePending,
-        UserFilter,
-        UseSkinCursor,
-        UseTaikoSkin,
-        Video,
-        Wiimote,
-        YahooIntegration,
-        ForceFrameFlush,
-        DetectPerformanceIssues,
-        Fullscreen,
+        AudioOffset,
+        VolumeInactive,
         MenuMusic,
         MenuVoice,
+        CursorRotation,
         MenuParallax,
-        RawInput,
-        AbsoluteToOsuWindow,
-        ConfineMouse,
-        ShowMenuTips,
-        HiddenShowFirstApproach,
-        ComboColourSliderBall,
-        AlternativeChatFont,
-        Password,
+        BeatmapDetailTab,
         Username,
-        DisplayStarsMaximum,
-        DisplayStarsMinimum,
-        AudioDevice,
         ReleaseStream,
-        UpdateFailCount,
         SavePassword,
         SaveUsername,
-        TreeSortMode,
-        TreeSortMode2,
-        Letterboxing,
-        LetterboxPositionX,
-        LetterboxPositionY,
-        FrameSync,
-        ShowUnicode,
-        PermanentSongInfo,
-        Ticker,
-        CompatibilityContext,
-        CanForceOptimusCompatibility,
+        DisplayStarsMinimum,
+        DisplayStarsMaximum,
+        RandomSelectAlgorithm,
+        SnakingInSliders,
+        SnakingOutSliders,
+        ShowFpsDisplay,
+        ChatDisplayHeight,
+        Version,
+        ShowConvertedBeatmaps,
+        SpeedChangeVisualisation,
+        Skin,
+        ScreenshotFormat,
+        ScreenshotCaptureMenuCursor,
+        SongSelectRightMouseScroll,
+        BeatmapSkins,
+        BeatmapHitsounds,
+        IncreaseFirstObjectVisibility,
+        ScoreDisplayMode
     }
 }

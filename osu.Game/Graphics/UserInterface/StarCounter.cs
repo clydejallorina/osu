@@ -1,27 +1,18 @@
-﻿//Copyright (c) 2007-2016 ppy Pty Ltd <contact@ppy.sh>.
-//Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+﻿// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
 
 using OpenTK;
-using osu.Framework;
 using osu.Framework.Graphics;
 using osu.Framework.Graphics.Containers;
-using osu.Framework.Graphics.Transformations;
 using osu.Framework.MathUtils;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using osu.Framework.Allocation;
 
 namespace osu.Game.Graphics.UserInterface
 {
     public class StarCounter : Container
     {
-        private readonly Container starContainer;
-        private readonly List<TextAwesome> stars = new List<TextAwesome>();
-
-        private double transformStartTime = 0;
+        private readonly Container<Star> stars;
 
         /// <summary>
         /// Maximum amount of stars displayed.
@@ -29,164 +20,135 @@ namespace osu.Game.Graphics.UserInterface
         /// <remarks>
         /// This does not limit the counter value, but the amount of stars displayed.
         /// </remarks>
-        public int MaxStars
-        {
-            get;
-            protected set;
-        }
+        public int StarCount { get; }
 
-        private double animationDelay => 150;
+        private double animationDelay => 80;
 
-        private double scalingDuration => 500;
-        private EasingTypes scalingEasing => EasingTypes.OutElasticHalf;
-        private float minStarScale => 0.3f;
+        private double scalingDuration => 1000;
+        private Easing scalingEasing => Easing.OutElasticHalf;
+        private float minStarScale => 0.4f;
 
         private double fadingDuration => 100;
         private float minStarAlpha => 0.5f;
 
-        public float StarSize = 20;
-        public float StarSpacing = 4;
+        private const float star_size = 20;
+        private const float star_spacing = 4;
 
-        public float VisibleValue
-        {
-            get
-            {
-                double elapsedTime = Time.Current - transformStartTime;
-                double expectedElapsedTime = Math.Abs(prevCount - count) * animationDelay;
-                if (elapsedTime >= expectedElapsedTime)
-                    return count;
-                return Interpolation.ValueAt(elapsedTime, prevCount, count, 0, expectedElapsedTime);
-            }
-        }
-
-        private float prevCount;
-        private float count;
+        private float countStars;
 
         /// <summary>
         /// Amount of stars represented.
         /// </summary>
-        public float Count
+        public float CountStars
         {
             get
             {
-                return count;
+                return countStars;
             }
 
             set
             {
+                if (countStars == value) return;
+
                 if (IsLoaded)
-                {
-                    prevCount = VisibleValue;
-                    transformCount(prevCount, value);
-                }
-
-                count = value;
+                    transformCount(value);
+                countStars = value;
             }
-        }
-
-        /// <summary>
-        /// Shows a float count as stars (up to 10). Used as star difficulty display.
-        /// </summary>
-        public StarCounter() : this(10)
-        {
-            AutoSizeAxes = Axes.Both;
         }
 
         /// <summary>
         /// Shows a float count as stars. Used as star difficulty display.
         /// </summary>
-        /// <param name="maxstars">Maximum amount of stars to display.</param>
-        public StarCounter(int maxstars)
+        /// <param name="starCount">Maximum amount of stars to display.</param>
+        public StarCounter(int starCount = 10)
         {
-            MaxStars = Math.Max(maxstars, 0);
+            StarCount = Math.Max(starCount, 0);
+
+            AutoSizeAxes = Axes.Both;
 
             Children = new Drawable[]
             {
-                starContainer = new Container
+                stars = new FillFlowContainer<Star>
                 {
-                    Anchor = Anchor.CentreLeft,
-                    Origin = Anchor.CentreLeft,
+                    AutoSizeAxes = Axes.Both,
+                    Direction = FillDirection.Horizontal,
+                    Spacing = new Vector2(star_spacing),
+                    ChildrenEnumerable = Enumerable.Range(0, StarCount).Select(i => new Star { Alpha = minStarAlpha })
                 }
             };
-
-            starContainer.Width = MaxStars * StarSize + Math.Max(MaxStars - 1, 0) * StarSpacing;
-            starContainer.Height = StarSize;
-
-            for (int i = 0; i < MaxStars; i++)
-            {
-                TextAwesome star = new TextAwesome
-                {
-                    Icon = FontAwesome.fa_star,
-                    Anchor = Anchor.CentreLeft,
-                    Origin = Anchor.Centre,
-                    TextSize = StarSize,
-                    Scale = new Vector2(minStarScale),
-                    Alpha = minStarAlpha,
-                    Position = new Vector2((StarSize + StarSpacing) * i + (StarSize + StarSpacing) / 2, 0),
-                };
-
-                //todo: user Container<T> once we have it.
-                stars.Add(star);
-                starContainer.Add(star);
-            }
         }
 
         protected override void LoadComplete()
         {
             base.LoadComplete();
+
             // Animate initial state from zero.
-            transformCount(0, Count);
+            ReplayAnimation();
         }
 
         public void ResetCount()
         {
-            Count = 0;
+            countStars = 0;
             StopAnimation();
+        }
+
+        public void ReplayAnimation()
+        {
+            var t = countStars;
+            ResetCount();
+            CountStars = t;
         }
 
         public void StopAnimation()
         {
-            prevCount = count;
-            transformStartTime = Time.Current;
-
-            for (int i = 0; i < MaxStars; i++)
-                transformStarQuick(i, count);
+            int i = 0;
+            foreach (var star in stars.Children)
+            {
+                star.ClearTransforms(true);
+                star.FadeTo(i < countStars ? 1.0f : minStarAlpha);
+                star.Icon.ScaleTo(getStarScale(i, countStars));
+                i++;
+            }
         }
 
         private float getStarScale(int i, float value)
         {
             if (value <= i)
                 return minStarScale;
-            if (i + 1 <= value)
-                return 1.0f;
-            return Interpolation.ValueAt(value, minStarScale, 1.0f, i, i + 1);
+
+            return i + 1 <= value ? 1.0f : Interpolation.ValueAt(value, minStarScale, 1.0f, i, i + 1);
         }
 
-        private void transformStar(int i, float value)
+        private void transformCount(float newValue)
         {
-            stars[i].FadeTo(i < value ? 1.0f : minStarAlpha, fadingDuration);
-            stars[i].ScaleTo(getStarScale(i, value), scalingDuration, scalingEasing);
-        }
-
-        private void transformStarQuick(int i, float value)
-        {
-            stars[i].FadeTo(i < value ? 1.0f : minStarAlpha);
-            stars[i].ScaleTo(getStarScale(i, value));
-        }
-
-        private void transformCount(float currentValue, float newValue)
-        {
-            for (int i = 0; i < MaxStars; i++)
+            int i = 0;
+            foreach (var star in stars.Children)
             {
-                stars[i].ClearTransformations();
-                if (currentValue <= newValue)
-                    stars[i].Delay(Math.Max(i - currentValue, 0) * animationDelay);
-                else
-                    stars[i].Delay(Math.Max(currentValue - 1 - i, 0) * animationDelay);
-                transformStar(i, newValue);
-                stars[i].DelayReset();
+                star.ClearTransforms(true);
+
+                var delay = (countStars <= newValue ? Math.Max(i - countStars, 0) : Math.Max(countStars - 1 - i, 0)) * animationDelay;
+                star.Delay(delay).FadeTo(i < newValue ? 1.0f : minStarAlpha, fadingDuration);
+                star.Icon.Delay(delay).ScaleTo(getStarScale(i, newValue), scalingDuration, scalingEasing);
+
+                i++;
             }
-            transformStartTime = Time.Current;
+        }
+
+        private class Star : Container
+        {
+            public readonly SpriteIcon Icon;
+            public Star()
+            {
+                Size = new Vector2(star_size);
+
+                Child = Icon = new SpriteIcon
+                {
+                    Size = new Vector2(star_size),
+                    Icon = FontAwesome.fa_star,
+                    Anchor = Anchor.Centre,
+                    Origin = Anchor.Centre,
+                };
+            }
         }
     }
 }

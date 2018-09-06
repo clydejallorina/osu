@@ -1,42 +1,64 @@
-//Copyright (c) 2007-2016 ppy Pty Ltd <contact@ppy.sh>.
-//Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
 
-using System.Collections.Generic;
-using OpenTK.Graphics;
 using osu.Game.Beatmaps.Timing;
-using osu.Game.Database;
-using osu.Game.Modes.Objects;
+using osu.Game.Rulesets.Objects;
+using System.Collections.Generic;
+using System.Linq;
+using osu.Game.Beatmaps.ControlPoints;
+using Newtonsoft.Json;
+using osu.Game.IO.Serialization.Converters;
 
 namespace osu.Game.Beatmaps
 {
-    public class Beatmap
+    /// <summary>
+    /// A Beatmap containing converted HitObjects.
+    /// </summary>
+    public class Beatmap<T> : IBeatmap
+        where T : HitObject
     {
-        public BeatmapInfo BeatmapInfo { get; set; }
-        public BeatmapMetadata Metadata => BeatmapInfo?.Metadata ?? BeatmapInfo?.BeatmapSet?.Metadata;
-        public List<HitObject> HitObjects { get; set; }
-        public List<ControlPoint> ControlPoints { get; set; }
-        public List<Color4> ComboColors { get; set; }
-
-        public double BeatLengthAt(double time, bool applyMultipliers = false)
+        public BeatmapInfo BeatmapInfo { get; set; } = new BeatmapInfo
         {
-            int point = 0;
-            int samplePoint = 0;
+            Metadata = new BeatmapMetadata
+            {
+                Artist = @"Unknown",
+                Title = @"Unknown",
+                AuthorString = @"Unknown Creator",
+            },
+            Version = @"Normal",
+            BaseDifficulty = new BeatmapDifficulty()
+        };
 
-            for (int i = 0; i < ControlPoints.Count; i++)
-                if (ControlPoints[i].Time <= time)
-                {
-                    if (ControlPoints[i].TimingChange)
-                        point = i;
-                    else
-                        samplePoint = i;
-                }
+        [JsonIgnore]
+        public BeatmapMetadata Metadata => BeatmapInfo?.Metadata ?? BeatmapInfo?.BeatmapSet?.Metadata;
 
-            double mult = 1;
+        public ControlPointInfo ControlPointInfo { get; set; } = new ControlPointInfo();
 
-            if (applyMultipliers && samplePoint > point && ControlPoints[samplePoint].BeatLength < 0)
-                mult = ControlPoints[samplePoint].VelocityAdjustment;
+        public List<BreakPeriod> Breaks { get; set; } = new List<BreakPeriod>();
 
-            return ControlPoints[point].BeatLength * mult;
-        }
+        /// <summary>
+        /// Total amount of break time in the beatmap.
+        /// </summary>
+        [JsonIgnore]
+        public double TotalBreakTime => Breaks.Sum(b => b.Duration);
+
+        /// <summary>
+        /// The HitObjects this Beatmap contains.
+        /// </summary>
+        [JsonConverter(typeof(TypedListConverter<HitObject>))]
+        public List<T> HitObjects = new List<T>();
+
+        IEnumerable<HitObject> IBeatmap.HitObjects => HitObjects;
+
+        public virtual IEnumerable<BeatmapStatistic> GetStatistics() => Enumerable.Empty<BeatmapStatistic>();
+
+        IBeatmap IBeatmap.Clone() => Clone();
+
+        public Beatmap<T> Clone() => (Beatmap<T>)MemberwiseClone();
+    }
+
+    public class Beatmap : Beatmap<HitObject>
+    {
+        public new Beatmap Clone() => (Beatmap)base.Clone();
     }
 }

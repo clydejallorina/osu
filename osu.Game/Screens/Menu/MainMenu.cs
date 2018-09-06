@@ -1,97 +1,199 @@
-//Copyright (c) 2007-2016 ppy Pty Ltd <contact@ppy.sh>.
-//Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
 
+using OpenTK;
+using OpenTK.Graphics;
+using OpenTK.Input;
 using osu.Framework.Allocation;
-using osu.Framework.GameModes;
-using osu.Framework.GameModes.Testing;
 using osu.Framework.Graphics;
-using osu.Framework.Graphics.Transformations;
+using osu.Framework.Input.EventArgs;
+using osu.Framework.Input.States;
+using osu.Framework.Screens;
+using osu.Game.Beatmaps;
 using osu.Game.Graphics.Containers;
-using osu.Game.Modes;
 using osu.Game.Screens.Backgrounds;
 using osu.Game.Screens.Charts;
 using osu.Game.Screens.Direct;
 using osu.Game.Screens.Edit;
-using osu.Game.Screens.Multiplayer;
-using osu.Game.Screens.Play;
-using OpenTK;
+using osu.Game.Screens.Multi;
 using osu.Game.Screens.Select;
+using osu.Game.Screens.Tournament;
 
 namespace osu.Game.Screens.Menu
 {
-    public class MainMenu : OsuGameMode
+    public class MainMenu : OsuScreen
     {
-        private ButtonSystem buttons;
-        public override string Name => @"Main Menu";
+        private readonly ButtonSystem buttons;
 
-        internal override bool ShowOverlays => true;
+        protected override bool HideOverlaysOnEnter => buttons.State == ButtonSystemState.Initial;
 
-        private BackgroundMode background;
+        protected override bool AllowBackButton => buttons.State != ButtonSystemState.Initial;
 
-        protected override BackgroundMode CreateBackground() => background;
+        private readonly BackgroundScreenDefault background;
+        private Screen songSelect;
+
+        private readonly MenuSideFlashes sideFlashes;
+
+        protected override BackgroundScreen CreateBackground() => background;
 
         public MainMenu()
         {
-            background = new BackgroundModeDefault();
+            background = new BackgroundScreenDefault();
 
             Children = new Drawable[]
             {
+                new ExitConfirmOverlay
+                {
+                    Action = Exit,
+                },
                 new ParallaxContainer
                 {
                     ParallaxAmount = 0.01f,
                     Children = new Drawable[]
                     {
-                        buttons = new ButtonSystem()
+                        buttons = new ButtonSystem
                         {
                             OnChart = delegate { Push(new ChartListing()); },
                             OnDirect = delegate { Push(new OnlineListing()); },
-                            OnEdit = delegate { Push(new EditSongSelect()); },
-                            OnSolo = delegate { Push(new PlaySongSelect()); },
-                            OnMulti = delegate { Push(new Lobby()); },
-                            OnTest  = delegate { Push(new TestBrowser()); },
-                            OnExit = delegate { Scheduler.AddDelayed(Exit, ButtonSystem.EXIT_DELAY); },
+                            OnEdit = delegate { Push(new Editor()); },
+                            OnSolo = onSolo,
+                            OnMulti = delegate { Push(new Multiplayer()); },
+                            OnExit = Exit,
                         }
                     }
-                }
+                },
+                sideFlashes = new MenuSideFlashes(),
             };
         }
 
-        [BackgroundDependencyLoader]
-        private void load(OsuGame game)
+        [BackgroundDependencyLoader(true)]
+        private void load(OsuGame game = null)
         {
-            background.Preload(game);
+            LoadComponentAsync(background);
 
-            buttons.OnSettings = game.ToggleOptions;
+            if (game != null)
+            {
+                buttons.OnSettings = game.ToggleSettings;
+                buttons.OnDirect = game.ToggleDirect;
+            }
+
+            preloadSongSelect();
         }
 
-        protected override void LoadComplete()
+        private void preloadSongSelect()
         {
-            base.LoadComplete();
+            if (songSelect == null)
+                LoadComponentAsync(songSelect = new PlaySongSelect());
+        }
+
+        public void LoadToSolo() => Schedule(onSolo);
+
+        private void onSolo() => Push(consumeSongSelect());
+
+        private Screen consumeSongSelect()
+        {
+            var s = songSelect;
+            songSelect = null;
+            return s;
+        }
+
+        protected override void OnEntering(Screen last)
+        {
+            base.OnEntering(last);
             buttons.FadeInFromZero(500);
+
+            var track = Beatmap.Value.Track;
+            var metadata = Beatmap.Value.Metadata;
+
+            if (last is Intro && track != null)
+            {
+                if (!track.IsRunning)
+                {
+                    track.Seek(metadata.PreviewTime != -1 ? metadata.PreviewTime : 0.4f * track.Length);
+                    track.Start();
+                }
+            }
+
+            Beatmap.ValueChanged += beatmap_ValueChanged;
         }
 
-        protected override void OnSuspending(GameMode next)
+        protected override void LogoArriving(OsuLogo logo, bool resuming)
+        {
+            base.LogoArriving(logo, resuming);
+
+            buttons.SetOsuLogo(logo);
+
+            logo.FadeColour(Color4.White, 100, Easing.OutQuint);
+            logo.FadeIn(100, Easing.OutQuint);
+
+            if (resuming)
+            {
+                buttons.State = ButtonSystemState.TopLevel;
+
+                const float length = 300;
+
+                Content.FadeIn(length, Easing.OutQuint);
+                Content.MoveTo(new Vector2(0, 0), length, Easing.OutQuint);
+
+                sideFlashes.Delay(length).FadeIn(64, Easing.InQuint);
+            }
+        }
+
+        protected override void LogoSuspending(OsuLogo logo)
+        {
+            logo.FadeOut(300, Easing.InSine)
+                .ScaleTo(0.2f, 300, Easing.InSine)
+                .OnComplete(l => buttons.SetOsuLogo(null));
+        }
+
+        private void beatmap_ValueChanged(WorkingBeatmap newValue)
+        {
+            if (!IsCurrentScreen)
+                return;
+
+            background.Next();
+        }
+
+        protected override void OnSuspending(Screen next)
         {
             base.OnSuspending(next);
 
             const float length = 400;
 
-            buttons.State = MenuState.EnteringMode;
+            buttons.State = ButtonSystemState.EnteringMode;
 
-            Content.FadeOut(length, EasingTypes.InSine);
-            Content.MoveTo(new Vector2(-800, 0), length, EasingTypes.InSine);
+            Content.FadeOut(length, Easing.InSine);
+            Content.MoveTo(new Vector2(-800, 0), length, Easing.InSine);
+
+            sideFlashes.FadeOut(64, Easing.OutQuint);
         }
 
-        protected override void OnResuming(GameMode last)
+        protected override void OnResuming(Screen last)
         {
             base.OnResuming(last);
 
-            const float length = 300;
+            background.Next();
 
-            buttons.State = MenuState.TopLevel;
+            //we may have consumed our preloaded instance, so let's make another.
+            preloadSongSelect();
+        }
 
-            Content.FadeIn(length, EasingTypes.OutQuint);
-            Content.MoveTo(new Vector2(0, 0), length, EasingTypes.OutQuint);
+        protected override bool OnExiting(Screen next)
+        {
+            buttons.State = ButtonSystemState.Exit;
+            Content.FadeOut(3000);
+            return base.OnExiting(next);
+        }
+
+        protected override bool OnKeyDown(InputState state, KeyDownEventArgs args)
+        {
+            if (!args.Repeat && state.Keyboard.ControlPressed && state.Keyboard.ShiftPressed && args.Key == Key.D)
+            {
+                Push(new Drawings());
+                return true;
+            }
+
+            return base.OnKeyDown(state, args);
         }
     }
 }

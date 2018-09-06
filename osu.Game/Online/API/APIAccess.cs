@@ -1,68 +1,85 @@
-﻿//Copyright (c) 2007-2016 ppy Pty Ltd <contact@ppy.sh>.
-//Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+﻿// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
 
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
 using System.Net;
 using System.Threading;
-using osu.Framework;
+using osu.Framework.Configuration;
+using osu.Framework.Graphics;
 using osu.Framework.Logging;
-using osu.Framework.Threading;
+using osu.Game.Configuration;
 using osu.Game.Online.API.Requests;
+using osu.Game.Users;
 
 namespace osu.Game.Online.API
 {
-    public class APIAccess : IUpdateable
+    public class APIAccess : Component, IAPIProvider
     {
-        private OAuth authentication;
+        private readonly OsuConfigManager config;
+        private readonly OAuth authentication;
 
-        public string Endpoint = @"https://new.ppy.sh";
-        const string ClientId = @"daNBnfdv7SppRVc61z0XuOI13y6Hroiz";
-        const string ClientSecret = @"d6fgZuZeQ0eSXkEj5igdqQX6ztdtS6Ow";
+        public string Endpoint = @"https://osu.ppy.sh";
+        private const string client_id = @"5";
+        private const string client_secret = @"FGc9GAtyHzeQDshWP5Ah7dega8hJACAJpQtw6OXk";
 
-        ConcurrentQueue<APIRequest> queue = new ConcurrentQueue<APIRequest>();
+        private readonly Queue<APIRequest> queue = new Queue<APIRequest>();
 
-        public Scheduler Scheduler = new Scheduler();
+        /// <summary>
+        /// The username/email provided by the user when initiating a login.
+        /// </summary>
+        public string ProvidedUsername { get; private set; }
 
-        public string Username;
+        private string password;
 
-        private SecurePassword password;
+        public Bindable<User> LocalUser { get; } = new Bindable<User>(createGuestUser());
 
-        public string Password
+        protected bool HasLogin => authentication.Token.Value != null || !string.IsNullOrEmpty(ProvidedUsername) && !string.IsNullOrEmpty(password);
+
+        private readonly CancellationTokenSource cancellationToken = new CancellationTokenSource();
+
+        private readonly Logger log;
+
+        public APIAccess(OsuConfigManager config)
         {
-            set
-            {
-                password = string.IsNullOrEmpty(value) ? null : new SecurePassword(value);
-            }
-        }
+            this.config = config;
 
-        public string Token
-        {
-            get { return authentication.Token?.ToString(); }
-
-            set
-            {
-
-                if (string.IsNullOrEmpty(value))
-                    authentication.Token = null;
-                else
-                    authentication.Token = OAuthToken.Parse(value);
-            }
-        }
-
-        protected bool HasLogin => Token != null || (!string.IsNullOrEmpty(Username) && password != null);
-
-        private Thread thread;
-
-        Logger log;
-
-        public APIAccess()
-        {
-            authentication = new OAuth(ClientId, ClientSecret, Endpoint);
+            authentication = new OAuth(client_id, client_secret, Endpoint);
             log = Logger.GetLogger(LoggingTarget.Network);
 
-            thread = new Thread(run) { IsBackground = true };
+            ProvidedUsername = config.Get<string>(OsuSetting.Username);
+
+            authentication.TokenString = config.Get<string>(OsuSetting.Token);
+            authentication.Token.ValueChanged += onTokenChanged;
+
+            var thread = new Thread(run)
+            {
+                Name = "APIAccess",
+                IsBackground = true
+            };
+
             thread.Start();
+        }
+
+        private void onTokenChanged(OAuthToken token) => config.Set(OsuSetting.Token, config.Get<bool>(OsuSetting.SavePassword) ? authentication.TokenString : string.Empty);
+
+        private readonly List<IOnlineComponent> components = new List<IOnlineComponent>();
+
+        internal new void Schedule(Action action) => base.Schedule(action);
+
+        public void Register(IOnlineComponent component)
+        {
+            Scheduler.Add(delegate
+            {
+                components.Add(component);
+                component.APIStateChanged(this, state);
+            });
+        }
+
+        public void Unregister(IOnlineComponent component)
+        {
+            Scheduler.Add(delegate { components.Remove(component); });
         }
 
         public string AccessToken => authentication.RequestAccessToken();
@@ -70,79 +87,106 @@ namespace osu.Game.Online.API
         /// <summary>
         /// Number of consecutive requests which failed due to network issues.
         /// </summary>
-        int failureCount = 0;
+        private int failureCount;
 
         private void run()
         {
-            while (true)
+            while (!cancellationToken.IsCancellationRequested)
             {
                 switch (State)
                 {
                     case APIState.Failing:
                         //todo: replace this with a ping request.
-                        log.Add($@"In a failing state, waiting a bit before we try again...");
+                        log.Add(@"In a failing state, waiting a bit before we try again...");
                         Thread.Sleep(5000);
                         if (queue.Count == 0)
                         {
-                            log.Add($@"Queueing a ping request");
-                            Queue(new ListChannelsRequest() { Timeout = 5000 });
+                            log.Add(@"Queueing a ping request");
+                            Queue(new ListChannelsRequest { Timeout = 5000 });
                         }
+
                         break;
                     case APIState.Offline:
+                    case APIState.Connecting:
                         //work to restore a connection...
                         if (!HasLogin)
                         {
-                            //OsuGame.Scheduler.Add(() => { OsuGame.ShowLogin(); });
-
                             State = APIState.Offline;
+                            Thread.Sleep(50);
+                            continue;
+                        }
+
+                        State = APIState.Connecting;
+
+                        // save the username at this point, if the user requested for it to be.
+                        config.Set(OsuSetting.Username, config.Get<bool>(OsuSetting.SaveUsername) ? ProvidedUsername : string.Empty);
+
+                        if (!authentication.HasValidAccessToken && !authentication.AuthenticateWithLogin(ProvidedUsername, password))
+                        {
+                            //todo: this fails even on network-related issues. we should probably handle those differently.
+                            //NotificationOverlay.ShowMessage("Login failed!");
+                            log.Add(@"Login failed!");
+                            password = null;
+                            authentication.Clear();
+                            continue;
+                        }
+
+                        var userReq = new GetUserRequest();
+                        userReq.Success += u =>
+                        {
+                            LocalUser.Value = u;
+                            failureCount = 0;
+
+                            //we're connected!
+                            State = APIState.Online;
+                        };
+
+                        if (!handleRequest(userReq))
+                        {
                             Thread.Sleep(500);
                             continue;
                         }
 
-                        if (State < APIState.Connecting)
-                            State = APIState.Connecting;
+                        // The Success callback event is fired on the main thread, so we should wait for that to run before proceeding.
+                        // Without this, we will end up circulating this Connecting loop multiple times and queueing up many web requests
+                        // before actually going online.
+                        while (State > APIState.Offline && State < APIState.Online)
+                            Thread.Sleep(500);
 
-                        if (!authentication.HasValidAccessToken && !authentication.AuthenticateWithLogin(Username, password.Get(Representation.Raw)))
-                        {
-                            //todo: this fails even on network-related issues. we should probably handle those differently.
-                            //NotificationManager.ShowMessage("Login failed!");
-                            log.Add(@"Login failed!");
-                            ClearCredentials();
-                            continue;
-                        }
-
-                        //we're connected!
-                        State = APIState.Online;
-                        failureCount = 0;
                         break;
                 }
 
                 //hard bail if we can't get a valid access token.
                 if (authentication.RequestAccessToken() == null)
                 {
-                    State = APIState.Offline;
+                    Logout(false);
                     continue;
                 }
 
-                //process the request queue.
-                APIRequest req;
-                while (queue.TryPeek(out req))
+                while (true)
                 {
-                    if (handleRequest(req))
+                    APIRequest req;
+
+                    lock (queue)
                     {
-                        //we have succeeded, so let's unqueue.
-                        queue.TryDequeue(out req);
+                        if (queue.Count == 0) break;
+                        req = queue.Dequeue();
                     }
+
+                    // TODO: handle failures better
+                    handleRequest(req);
                 }
 
-                Thread.Sleep(1);
+                Thread.Sleep(50);
             }
         }
 
-        private void ClearCredentials()
+        public void Login(string username, string password)
         {
-            Username = null;
-            password = null;
+            Debug.Assert(State == APIState.Offline);
+
+            ProvidedUsername = username;
+            this.password = password;
         }
 
         /// <summary>
@@ -154,20 +198,33 @@ namespace osu.Game.Online.API
         {
             try
             {
+                Logger.Log($@"Performing request {req}", LoggingTarget.Network);
                 req.Perform(this);
 
-                State = APIState.Online;
+                //we could still be in initialisation, at which point we don't want to say we're Online yet.
+                if (IsLoggedIn)
+                    State = APIState.Online;
+
                 failureCount = 0;
                 return true;
             }
             catch (WebException we)
             {
-                HttpStatusCode statusCode = (we.Response as HttpWebResponse)?.StatusCode ?? HttpStatusCode.RequestTimeout;
+                HttpStatusCode statusCode = (we.Response as HttpWebResponse)?.StatusCode
+                                            ?? (we.Status == WebExceptionStatus.UnknownError ? HttpStatusCode.NotAcceptable : HttpStatusCode.RequestTimeout);
+
+                // special cases for un-typed but useful message responses.
+                switch (we.Message)
+                {
+                    case "Unauthorized":
+                        statusCode = HttpStatusCode.Unauthorized;
+                        break;
+                }
 
                 switch (statusCode)
                 {
                     case HttpStatusCode.Unauthorized:
-                        State = APIState.Offline;
+                        Logout(false);
                         return true;
                     case HttpStatusCode.RequestTimeout:
                         failureCount++;
@@ -178,6 +235,7 @@ namespace osu.Game.Online.API
                             return false;
 
                         State = APIState.Failing;
+                        flushQueue();
                         return true;
                 }
 
@@ -195,95 +253,101 @@ namespace osu.Game.Online.API
         }
 
         private APIState state;
+
         public APIState State
         {
             get { return state; }
-            set
+            private set
             {
                 APIState oldState = state;
                 APIState newState = value;
 
                 state = value;
 
-                switch (state)
-                {
-                    case APIState.Failing:
-                    case APIState.Offline:
-                        flushQueue();
-                        break;
-                }
-
                 if (oldState != newState)
                 {
-                    //OsuGame.Scheduler.Add(delegate
+                    log.Add($@"We just went {newState}!");
+                    Scheduler.Add(delegate
                     {
-                        //NotificationManager.ShowMessage($@"We just went {newState}!", newState == APIState.Online ? Color4.YellowGreen : Color4.OrangeRed, 5000);
-                        log.Add($@"We just went {newState}!");
-                        Scheduler.Add(delegate
-                        {
-                            OnStateChange?.Invoke(oldState, newState);
-                        });
-                    }
+                        components.ForEach(c => c.APIStateChanged(this, newState));
+                        OnStateChange?.Invoke(oldState, newState);
+                    });
                 }
             }
         }
 
+        public bool IsLoggedIn => LocalUser.Value.Id > 1;
+
         public void Queue(APIRequest request)
         {
-            queue.Enqueue(request);
+            lock (queue) queue.Enqueue(request);
         }
 
         public event StateChangeDelegate OnStateChange;
 
         public delegate void StateChangeDelegate(APIState oldState, APIState newState);
 
-        public enum APIState
-        {
-            /// <summary>
-            /// We cannot login (not enough credentials).
-            /// </summary>
-            Offline,
-
-            /// <summary>
-            /// We are having connectivity issues.
-            /// </summary>
-            Failing,
-
-            /// <summary>
-            /// We are in the process of (re-)connecting.
-            /// </summary>
-            Connecting,
-
-            /// <summary>
-            /// We are online.
-            /// </summary>
-            Online
-        }
-
         private void flushQueue(bool failOldRequests = true)
         {
-            var oldQueue = queue;
-
-            //flush the queue.
-            queue = new ConcurrentQueue<APIRequest>();
-
-            if (failOldRequests)
+            lock (queue)
             {
-                APIRequest req;
-                while (queue.TryDequeue(out req))
-                    req.Fail(new Exception(@"Disconnected from server"));
+                var oldQueueRequests = queue.ToArray();
+
+                queue.Clear();
+
+                if (failOldRequests)
+                {
+                    foreach (var req in oldQueueRequests)
+                        req.Fail(new WebException(@"Disconnected from server"));
+                }
             }
         }
 
-        public void Logout()
+        public void Logout(bool clearUsername = true)
         {
+            flushQueue();
+            if (clearUsername) ProvidedUsername = null;
+            password = null;
             authentication.Clear();
+            LocalUser.Value = createGuestUser();
             State = APIState.Offline;
         }
 
-        public void Update()
+        private static User createGuestUser() => new User
         {
-            Scheduler.Update();
+            Username = @"Guest",
+            Id = 1,
+        };
+
+        protected override void Dispose(bool isDisposing)
+        {
+            base.Dispose(isDisposing);
+
+            flushQueue();
+            cancellationToken.Cancel();
         }
+    }
+
+    public enum APIState
+    {
+        /// <summary>
+        /// We cannot login (not enough credentials).
+        /// </summary>
+        Offline,
+
+        /// <summary>
+        /// We are having connectivity issues.
+        /// </summary>
+        Failing,
+
+        /// <summary>
+        /// We are in the process of (re-)connecting.
+        /// </summary>
+        Connecting,
+
+        /// <summary>
+        /// We are online.
+        /// </summary>
+        Online
     }
 }

@@ -1,19 +1,25 @@
-﻿//Copyright (c) 2007-2016 ppy Pty Ltd <contact@ppy.sh>.
-//Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
+﻿// Copyright (c) 2007-2018 ppy Pty Ltd <contact@ppy.sh>.
+// Licensed under the MIT Licence - https://raw.githubusercontent.com/ppy/osu/master/LICENCE
 
-using System;
 using System.Diagnostics;
+using osu.Framework.Configuration;
 using osu.Framework.IO.Network;
 
 namespace osu.Game.Online.API
 {
-    internal class OAuth
+    public class OAuth
     {
         private readonly string clientId;
         private readonly string clientSecret;
         private readonly string endpoint;
 
-        public OAuthToken Token;
+        public readonly Bindable<OAuthToken> Token = new Bindable<OAuthToken>();
+
+        public string TokenString
+        {
+            get => Token.Value?.ToString();
+            set => Token.Value = string.IsNullOrEmpty(value) ? null : OAuthToken.Parse(value);
+        }
 
         internal OAuth(string clientId, string clientSecret, string endpoint)
         {
@@ -28,69 +34,83 @@ namespace osu.Game.Online.API
 
         internal bool AuthenticateWithLogin(string username, string password)
         {
-            var req = new AccessTokenRequestPassword(username, password)
+            if (string.IsNullOrEmpty(username)) return false;
+            if (string.IsNullOrEmpty(password)) return false;
+
+            using (var req = new AccessTokenRequestPassword(username, password)
             {
-                Url = $@"{endpoint}/oauth/access_token",
+                Url = $@"{endpoint}/oauth/token",
                 Method = HttpMethod.POST,
                 ClientId = clientId,
                 ClientSecret = clientSecret
-            };
-
-            try
+            })
             {
-                req.BlockingPerform();
-            }
-            catch
-            {
-                return false;
-            }
+                try
+                {
+                    req.Perform();
+                }
+                catch
+                {
+                    return false;
+                }
 
-            Token = req.ResponseObject;
-            return true;
+                Token.Value = req.ResponseObject;
+                return true;
+            }
         }
 
         internal bool AuthenticateWithRefresh(string refresh)
         {
             try
             {
-                var req = new AccessTokenRequestRefresh(refresh)
+                using (var req = new AccessTokenRequestRefresh(refresh)
                 {
-                    Url = $@"{endpoint}/oauth/access_token",
+                    Url = $@"{endpoint}/oauth/token",
                     Method = HttpMethod.POST,
                     ClientId = clientId,
                     ClientSecret = clientSecret
-                };
-                req.BlockingPerform();
+                })
+                {
+                    req.Perform();
 
-                Token = req.ResponseObject;
-                return true;
+                    Token.Value = req.ResponseObject;
+                    return true;
+                }
             }
             catch
             {
                 //todo: potentially only kill the refresh token on certain exception types.
-                Token = null;
+                Token.Value = null;
                 return false;
             }
         }
+
+        private static readonly object access_token_retrieval_lock = new object();
 
         /// <summary>
         /// Should be run before any API request to make sure we have a valid key.
         /// </summary>
         private bool ensureAccessToken()
         {
-            //todo: we need to mutex this to ensure only one authentication request is running at a time.
-
-            //If we already have a valid access token, let's use it.
+            // if we already have a valid access token, let's use it.
             if (accessTokenValid) return true;
 
-            //If not, let's try using our refresh token to request a new access token.
-            if (!string.IsNullOrEmpty(Token?.RefreshToken))
-                AuthenticateWithRefresh(Token.RefreshToken);
+            // we want to ensure only a single authentication update is happening at once.
+            lock (access_token_retrieval_lock)
+            {
+                // re-check if valid, in case another request completed and revalidated our access.
+                if (accessTokenValid) return true;
 
-            return accessTokenValid;
+                // if not, let's try using our refresh token to request a new access token.
+                if (!string.IsNullOrEmpty(Token.Value?.RefreshToken))
+                    // ReSharper disable once PossibleNullReferenceException
+                    AuthenticateWithRefresh(Token.Value.RefreshToken);
+
+                return accessTokenValid;
+            }
         }
 
-        private bool accessTokenValid => Token?.IsValid ?? false;
+        private bool accessTokenValid => Token.Value?.IsValid ?? false;
 
         internal bool HasValidAccessToken => RequestAccessToken() != null;
 
@@ -98,12 +118,12 @@ namespace osu.Game.Online.API
         {
             if (!ensureAccessToken()) return null;
 
-            return Token.AccessToken;
+            return Token.Value.AccessToken;
         }
 
         internal void Clear()
         {
-            Token = null;
+            Token.Value = null;
         }
 
         private class AccessTokenRequestRefresh : AccessTokenRequest
@@ -118,7 +138,8 @@ namespace osu.Game.Online.API
 
             protected override void PrePerform()
             {
-                Parameters[@"refresh_token"] = RefreshToken;
+                AddParameter("refresh_token", RefreshToken);
+
                 base.PrePerform();
             }
         }
@@ -137,8 +158,9 @@ namespace osu.Game.Online.API
 
             protected override void PrePerform()
             {
-                Parameters[@"username"] = Username;
-                Parameters[@"password"] = Password;
+                AddParameter("username", Username);
+                AddParameter("password", Password);
+
                 base.PrePerform();
             }
         }
@@ -152,9 +174,10 @@ namespace osu.Game.Online.API
 
             protected override void PrePerform()
             {
-                Parameters[@"grant_type"] = GrantType;
-                Parameters[@"client_id"] = ClientId;
-                Parameters[@"client_secret"] = ClientSecret;
+                AddParameter("grant_type", GrantType);
+                AddParameter("client_id", ClientId);
+                AddParameter("client_secret", ClientSecret);
+
                 base.PrePerform();
             }
         }
